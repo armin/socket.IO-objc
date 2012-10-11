@@ -76,7 +76,8 @@ NSString* const SocketIOException = @"SocketIOException";
 @synthesize isConnected = _isConnected, 
             isConnecting = _isConnecting, 
             useSecure = _useSecure, 
-            delegate = _delegate;
+            delegate = _delegate,
+            templateRequest = _templateRequest;
 
 - (id) initWithDelegate:(id<SocketIODelegate>)delegate
 {
@@ -90,6 +91,26 @@ NSString* const SocketIOException = @"SocketIOException";
     return self;
 }
 
+
+- (void) connectWithRequest:(NSURLRequest *)request
+{
+    // set request as template. It's used later in openSocket
+    self.templateRequest = request;
+    // extract all goodies from the template request (e.g. params)
+    NSArray *parameters = [request.URL.parameterString componentsSeparatedByString:@";"];
+    NSMutableDictionary *paramDict = [NSMutableDictionary dictionary];
+    [parameters enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
+      NSArray *pair = [obj componentsSeparatedByString:@"="];
+      if (pair) [paramDict setObject:[pair objectAtIndex:0] forKey:[pair objectAtIndex:1]];
+    }];
+    // use the base method to connect to the host using the goodies from the template request object
+    [self connectToHost:request.URL.host
+                 onPort:[request.URL.port integerValue]
+             withParams:paramDict
+          withNamespace:@"" // TODO extract name space form uri?
+   withHTTPHeaderFields:request.allHTTPHeaderFields];
+}
+
 - (void) connectToHost:(NSString *)host onPort:(NSInteger)port
 {
     [self connectToHost:host onPort:port withParams:nil withNamespace:@""];
@@ -101,6 +122,11 @@ NSString* const SocketIOException = @"SocketIOException";
 }
 
 - (void) connectToHost:(NSString *)host onPort:(NSInteger)port withParams:(NSDictionary *)params withNamespace:(NSString *)endpoint
+{
+  [self connectToHost:host onPort:port withParams:params withNamespace:@"" withHTTPHeaderFields:nil];
+}
+
+- (void) connectToHost:(NSString *)host onPort:(NSInteger)port withParams:(NSDictionary *)params withNamespace:(NSString *)endpoint withHTTPHeaderFields:(NSDictionary*)allHeaderFields
 {
     if (!_isConnected && !_isConnecting) {
         _isConnecting = YES;
@@ -133,10 +159,11 @@ NSString* const SocketIOException = @"SocketIOException";
                 
         
         // make a request
-        NSURLRequest *request = [NSURLRequest requestWithURL:url
+        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url
                                                  cachePolicy:NSURLRequestReloadIgnoringLocalAndRemoteCacheData 
                                              timeoutInterval:10.0];
-        
+        [request setAllHTTPHeaderFields:allHeaderFields];
+      
         NSURLConnection *connection = [NSURLConnection connectionWithRequest:request 
                                                                     delegate:self];
         if (connection) {
@@ -218,24 +245,33 @@ NSString* const SocketIOException = @"SocketIOException";
 
 - (void) openSocket
 {
+    _webSocket = nil;
     NSString *urlStr;
     NSString *format;
     if(_port) {
-        format = _useSecure ? kSecureSocketPortURL : kInsecureSocketPortURL;
-        urlStr = [NSString stringWithFormat:format, _host, _port, _sid];
+      format = _useSecure ? kSecureSocketPortURL : kInsecureSocketPortURL;
+      urlStr = [NSString stringWithFormat:format, _host, _port, _sid];
     }
     else {
-        format = _useSecure ? kSecureSocketURL : kInsecureSocketURL;
-        urlStr = [NSString stringWithFormat:format, _host, _sid];
+      format = _useSecure ? kSecureSocketURL : kInsecureSocketURL;
+      urlStr = [NSString stringWithFormat:format, _host, _sid];
     }
     NSURL *url = [NSURL URLWithString:urlStr];
 
-    _webSocket = nil;
-    
-    _webSocket = [[SRWebSocket alloc] initWithURL:url];
+    if (self.templateRequest) {
+      // If there is a template request property then we need to deal with the header fields (e.g for load balancing)
+      NSMutableURLRequest *wsRequest = [NSMutableURLRequest requestWithURL:url];
+      [wsRequest setAllHTTPHeaderFields:[self.templateRequest allHTTPHeaderFields]];
+      
+      _webSocket = [[SRWebSocket alloc] initWithURLRequest:wsRequest];
+      [self log:[NSString stringWithFormat:@"Opening %@", wsRequest]];
+    }
+    else {
+      _webSocket = [[SRWebSocket alloc] initWithURL:url];
+      [self log:[NSString stringWithFormat:@"Opening %@", url]];
+    }
     _webSocket.delegate = self;
-    [self log:[NSString stringWithFormat:@"Opening %@", url]];
-    [_webSocket open];    
+    [_webSocket open];
 }
 
 - (void) openXHRPolling
@@ -754,6 +790,8 @@ didReceiveAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge
     
     _queue = nil;
     _acks = nil;
+  
+    self.templateRequest = nil;
 }
 
 

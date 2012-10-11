@@ -80,8 +80,11 @@ typedef enum {
 @property (nonatomic, readonly) BOOL isConnected, isConnecting;
 @property (nonatomic) BOOL useSecure;
 @property (nonatomic, unsafe_unretained) id<SocketIODelegate> delegate;
+@property (nonatomic, copy) NSURLRequest *templateRequest;
 
 - (id) initWithDelegate:(id<SocketIODelegate>)delegate;
+// use request as a template. Request object may contain cookies and other header fields that may be required for load balancers.
+- (void) connectWithRequest:(NSURLRequest *)request;
 - (void) connectToHost:(NSString *)host onPort:(NSInteger)port;
 - (void) connectToHost:(NSString *)host onPort:(NSInteger)port withParams:(NSDictionary *)params;
 - (void) connectToHost:(NSString *)host onPort:(NSInteger)port withParams:(NSDictionary *)params withNamespace:(NSString *)endpoint;
